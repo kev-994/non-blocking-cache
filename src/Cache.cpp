@@ -154,3 +154,11 @@ void Cache::processBusMessage(const CoherenceMessage& msg)
         }
     }
 }
+
+/*
+when a snoop hits an active MSHR, it means two different caches have suffered a miss on the exact same block
+at the exact same time, creating a race condition.
+
+safely bypass this by designing the Interconnect as a smart directory that serializes requests
+and prevents these collisions from reaching the caches in the first place
+*/

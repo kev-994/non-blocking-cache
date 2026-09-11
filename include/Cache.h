@@ -2,11 +2,10 @@
 
 #include "CoherenceMessage.h"
 #include "MSHR.h"
+#include "Interconnect.h"
 
 #include <cstdint>
 #include <vector>
-
-class Interconnect;
 
 enum class RequestStatus
 {
@@ -25,6 +24,10 @@ struct CacheBlock
 class Cache
 {
 public:
+    Cache(std::uint64_t id, Interconnect* interconnect)
+        : m_cache_id{id}, m_interconnect{interconnect}
+    {}
+
     RequestStatus processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data=0, std::uint8_t& read_data_out);
     void processBusMessage(const CoherenceMessage& msg);
 
