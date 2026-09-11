@@ -31,8 +31,9 @@ enum class MessageType
 
     Writeback,
 
-    SnoopRequest,
-    SnoopResponse
+    SnoopRead,
+    SnoopInvalidate,
+    SnoopAck
 };
 
 struct CoherenceMessage

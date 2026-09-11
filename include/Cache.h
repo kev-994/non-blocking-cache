@@ -37,4 +37,6 @@ private:
 
     Interconnect* m_interconnect{};
 
+    void forwardToCPU(std::uint64_t cpu_id, std::uint8_t data);
+
 };

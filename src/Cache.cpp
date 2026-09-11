@@ -2,9 +2,11 @@
 
 RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out)
 {
-    std::uint64_t tag{address >> 6};
-    std::uint64_t offset{address & 0x3F}; // gives the lower 6 bits (64 byte line)
-    std::uint64_t block_address{address & ~0x3F};
+    const std::uint64_t tag{address >> 6};
+    const std::uint64_t offset{address & 0x3F}; // gives the lower 6 bits (64 byte line)
+    const std::uint64_t block_address{address & ~0x3F};
+
+    // ^ hardcoded
     
     for (auto& block : m_cache_blocks)
     {
@@ -76,5 +78,79 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
 
 void Cache::processBusMessage(const CoherenceMessage& msg)
 {
+    const auto tag{msg.address >> 6};
     
+    switch (msg.type)
+    {
+        case MessageType::ReadResponse:
+        {
+            for (std::size_t i{}; i < m_MSHRFile.size(); ++i)
+            {
+                if (m_MSHRFile[i].block_address == msg.transaction_id)
+                {
+                    MESIState state{m_MSHRFile[i].transient_state == MESIState::InvalidShared ? MESIState::Shared : MESIState::Modified};
+                    
+                    CacheBlock block{tag, state, msg.data};
+
+                    for (auto& target : m_MSHRFile[i].targets)
+                    {
+                        if (target.type == TargetType::Write)
+                        {
+                            block.data.data[target.offset] = target.write_data;
+                            block.state = MESIState::Modified;
+                        }
+
+                        else if (target.type == TargetType::Read)
+                        {
+                            forwardToCPU(target.requester_id, block.data.data[target.offset]);
+                        }
+                    }
+
+                    m_cache_blocks.push_back(block);
+                    m_MSHRFile.erase(m_MSHRFile.begin() + i); // remove resolved entry
+                    break;
+                }
+            }
+            break;
+        }
+        
+        case MessageType::SnoopRead:
+        {
+            for (auto& block : m_cache_blocks)
+            {
+                if (block.tag == tag)
+                {
+                    if (block.state == MESIState::Modified)
+                    {
+                        CoherenceMessage coherence_message{MessageType::Writeback, msg.address, msg.address, m_cache_id, msg.sender_id, msg.data};
+                        m_interconnect->routeMessage(coherence_message);
+                    }
+
+                    block.state = MESIState::Shared;
+                    break;
+                }
+            }
+            break;
+        }
+
+        case MessageType::SnoopInvalidate:
+        {
+            for (auto& block : m_cache_blocks)
+            {
+                if (block.tag == tag)
+                {
+                    if (block.state != MESIState::Invalid)
+                    {
+                        block.state = MESIState::Invalid;
+                    }
+
+                    CoherenceMessage coherence_message{MessageType::SnoopAck, msg.address, msg.address, m_cache_id, msg.sender_id}; // doesn't need to send data
+                    m_interconnect->routeMessage(coherence_message);
+
+                    break;
+                }
+            }
+            break;
+        }
+    }
 }
