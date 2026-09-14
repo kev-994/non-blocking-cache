@@ -4,7 +4,7 @@
 RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out)
 {
     const std::uint64_t tag{address >> 6};
-    const std::uint64_t offset{address & 0x3F}; // gives the lower 6 bits (64 byte line)
+    const std::uint8_t offset{static_cast<std::uint8_t>(address & 0x3F)}; // gives the lower 6 bits (64 byte line)
     const std::uint64_t block_address{address & ~0x3F};
 
     // ^ hardcoded
@@ -86,30 +86,54 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
     {
         case MessageType::ReadResponse:
         {
+            bool block_updated{};
+            
             for (std::size_t i{}; i < m_MSHRFile.size(); ++i)
             {
                 if (m_MSHRFile[i].block_address == msg.transaction_id)
                 {
-                    MESIState state{m_MSHRFile[i].transient_state == MESIState::InvalidShared ? MESIState::Shared : MESIState::Modified};
-                    
-                    CacheBlock block{tag, state, msg.data};
-
-                    for (auto& target : m_MSHRFile[i].targets)
+                    for (auto& block : m_cache_blocks)
                     {
-                        if (target.type == TargetType::Write)
+                        if (block.tag == tag)
                         {
-                            block.data.data[target.offset] = target.write_data;
-                            block.state = MESIState::Modified;
-                        }
+                            // correctly transition the state based on the MSHR transient state
+                            block.state = (m_MSHRFile[i].transient_state == MESIState::InvalidShared) ? MESIState::Shared : MESIState::Modified;
 
-                        else if (target.type == TargetType::Read)
-                        {
-                            std::cout << std::format("0x{:X}\n", block.data.data[target.offset]);
+                            // overwrite the stale block data with the newly fetched payload
+                            block.data = msg.data;
+
+                            for (auto& target : m_MSHRFile[i].targets)
+                            {
+                                if (target.type == TargetType::Write)
+                                {
+                                    block.data.data[target.offset] = target.write_data;
+                                }
+                            }
+                            m_MSHRFile.erase(m_MSHRFile.begin() + i);
+
+                            block_updated = true;
+
+                            break;
                         }
                     }
 
-                    m_cache_blocks.push_back(block);
-                    m_MSHRFile.erase(m_MSHRFile.begin() + i); // remove resolved entry
+                    if (!block_updated) // the block was never in the array, so make new block
+                    {
+                        MESIState state{m_MSHRFile[i].transient_state == MESIState::InvalidShared ? MESIState::Shared : MESIState::Modified};
+                    
+                        CacheBlock block{tag, state, msg.data};
+                        
+                        for (auto& target : m_MSHRFile[i].targets)
+                        {
+                            if (target.type == TargetType::Write)
+                            {
+                                block.data.data[target.offset] = target.write_data;
+                            }
+                        }
+
+                        m_cache_blocks.push_back(block);
+                        m_MSHRFile.erase(m_MSHRFile.begin() + i);
+                    }
                     break;
                 }
             }
@@ -122,14 +146,18 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
             {
                 if (block.tag == tag)
                 {
-                    if (block.state == MESIState::Modified)
+                    // ignore the snoop if we don't actually hold a valid copy of the block
+                    if (block.state != MESIState::Invalid)
                     {
-                        CoherenceMessage coherence_message{MessageType::Writeback, msg.address, msg.address, m_cache_id, msg.sender_id, msg.data};
-                        intercepted = true;
-                        m_interconnect->routeMessage(coherence_message);
+                        if (block.state == MESIState::Modified)
+                        {
+                            CoherenceMessage coherence_message{MessageType::Writeback, msg.address, msg.address, m_cache_id, msg.sender_id, block.data};
+                            intercepted = true;
+                            m_interconnect->routeMessage(coherence_message);
+                        }
+                        
+                        block.state = MESIState::Shared;
                     }
-
-                    block.state = MESIState::Shared;
                     break;
                 }
             }
@@ -142,22 +170,22 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
             {
                 if (block.tag == tag)
                 {
-                    if (block.state != MESIState::Invalid)
-                    {
-                        block.state = MESIState::Invalid;
-                    }
-
-                    CoherenceMessage coherence_message{MessageType::SnoopAck, msg.address, msg.address, m_cache_id, msg.sender_id}; // doesn't need to send data
-                    m_interconnect->routeMessage(coherence_message);
+                    block.state = MESIState::Invalid;
 
                     break;
                 }
             }
+
+            CoherenceMessage coherence_message{MessageType::SnoopAck, msg.address, msg.address, m_cache_id, msg.sender_id}; // doesn't need to send data
+            m_interconnect->routeMessage(coherence_message);
+
             break;
         }
 
         case MessageType::SnoopAck:
         {
+            bool block_updated{};
+            
             for (std::size_t i{}; i < m_MSHRFile.size(); ++i)
             {
                 if (m_MSHRFile[i].block_address == msg.transaction_id)
@@ -167,18 +195,42 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
                     // if all caches have invalidated their copies, complete the write
                     if (m_MSHRFile[i].acks_remaining == 0)
                     {
-                        CacheBlock block{tag, MESIState::Modified, msg.data}; 
-
-                        for (auto& target : m_MSHRFile[i].targets)
+                        for (auto& block : m_cache_blocks)
                         {
-                            if (target.type == TargetType::Write)
+                            if (block.tag == tag)
                             {
-                                block.data.data[target.offset] = target.write_data;
+                                block.state = MESIState::Modified;
+
+                                for (auto& target : m_MSHRFile[i].targets)
+                                {
+                                    if (target.type == TargetType::Write)
+                                    {
+                                        block.data.data[target.offset] = target.write_data;
+                                    }
+                                }
+                                m_MSHRFile.erase(m_MSHRFile.begin() + i);
+
+                                block_updated = true;
+
+                                break;
                             }
                         }
 
-                        m_cache_blocks.push_back(block);
-                        m_MSHRFile.erase(m_MSHRFile.begin() + i);
+                        if (!block_updated) // the block was never in the array, so make new block
+                        {
+                            CacheBlock block{tag, MESIState::Modified, msg.data};
+
+                            for (auto& target : m_MSHRFile[i].targets)
+                            {
+                                if (target.type == TargetType::Write)
+                                {
+                                    block.data.data[target.offset] = target.write_data;
+                                }
+                            }
+
+                            m_cache_blocks.push_back(block);
+                            m_MSHRFile.erase(m_MSHRFile.begin() + i);
+                        }
                     }
                     break;
                 }

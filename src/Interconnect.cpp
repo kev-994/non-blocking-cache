@@ -83,6 +83,15 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
             }
             break;
         }
+
+        case MessageType::ReadResponse:
+        {
+            if (msg.receiver_id < m_caches.size())
+            {
+                m_caches[msg.receiver_id]->processBusMessage(msg);
+            }
+            break;
+        }
     } 
 }
 

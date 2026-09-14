@@ -9,7 +9,7 @@ add_executable(main
     src/Cache.cpp
     src/Interconnect.cpp
     src/MemoryController.cpp
-    src/main.cpp
+    tests/main.cpp
 )
 
 target_include_directories(main PRIVATE
