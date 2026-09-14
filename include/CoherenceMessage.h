@@ -1,9 +1,10 @@
 #pragma once
 
-#include <cstdint>
-#include <array>
+#include "CacheLine.h"
 
-constexpr std::size_t CACHE_LINE_SIZE{64}; 
+#include <cstdint>
+
+constexpr std::uint64_t MEMORY_ID{0xFFFF};
 
 enum class MESIState
 {
@@ -14,12 +15,6 @@ enum class MESIState
 
     InvalidShared, // read miss (e.g., waiting for data)
     InvalidModified // write miss (e.g., waiting for invalidation acknowledgments from other caches)
-};
-
-template <typename T> // byte or word
-struct CacheLine
-{
-    std::array<T, CACHE_LINE_SIZE> data{};
 };
 
 enum class MessageType

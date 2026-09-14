@@ -2,6 +2,7 @@
 
 #include "CoherenceMessage.h"
 #include "MSHR.h"
+#include "CacheLine.h"
 
 #include <cstdint>
 #include <vector>

@@ -1,9 +1,15 @@
 #include "Interconnect.h"
 #include "Cache.h"
+#include "MemoryController.h"
 
 void Interconnect::attachCache(Cache* cache)
 {
     m_caches.push_back(cache);
+}
+
+void Interconnect::attachMemory(MemoryController* memory)
+{
+    m_memory = memory;
 }
 
 void Interconnect::routeMessage(const CoherenceMessage& msg)
@@ -12,13 +18,17 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
     {
         case MessageType::Writeback:
         {
-            assert(msg.receiver_id < m_caches.size());
+            if (msg.receiver_id != MEMORY_ID && msg.receiver_id < m_caches.size())
+            {
+                auto copy{msg};
+                copy.type = MessageType::ReadResponse;
 
-            auto copy{msg};
-            copy.type = MessageType::ReadResponse;
-
-            m_caches[msg.receiver_id]->processBusMessage(copy);
-            
+                m_caches[msg.receiver_id]->processBusMessage(copy);
+            }
+            else
+            {
+                m_memory->processBusMessage(msg);
+            }
             return;
         }
 
@@ -59,8 +69,7 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
             // only fetch from memory if no sibling cache had the dirty data
             if (!intercepted)
             {
-                CoherenceMessage mock_message{MessageType::ReadResponse, msg.address, msg.transaction_id, msg.sender_id, msg.sender_id, {}};
-                m_caches[msg.sender_id]->processBusMessage(mock_message);
+                m_memory->processBusMessage(msg);
             }
             return;
         }

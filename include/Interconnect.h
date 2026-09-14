@@ -6,14 +6,17 @@
 #include <cassert>
 
 class Cache;
+class MemoryController;
 
 class Interconnect
 {
 public:
     void attachCache(Cache* cache);
+    void attachMemory(MemoryController* memory); // setter
     void routeMessage(const CoherenceMessage& msg);
 
 private:
     std::vector<Cache*> m_caches{};
+    MemoryController* m_memory{};
 
 };
