@@ -104,7 +104,7 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
 
                         else if (target.type == TargetType::Read)
                         {
-                            forwardToCPU(target.requester_id, block.data.data[target.offset]);
+                            std::cout << std::format("0x{:X}\n", block.data.data[target.offset]);
                         }
                     }
 

@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <vector>
+#include <iostream>
+#include <format>
 
 class Interconnect;
 
@@ -30,7 +32,7 @@ public:
         : m_cache_id{id}, m_interconnect{interconnect}, m_total_caches{total_caches}
     {}
 
-    RequestStatus processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data=0, std::uint8_t& read_data_out);
+    RequestStatus processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out);
     bool processBusMessage(const CoherenceMessage& msg);
 
 private:
@@ -42,7 +44,5 @@ private:
     std::uint64_t m_cache_id{}; 
 
     Interconnect* m_interconnect{};
-
-    void forwardToCPU(std::uint64_t cpu_id, std::uint8_t data);
 
 };
