@@ -1,13 +1,16 @@
 #pragma once
 
-#include "Cache.h"
+#include "CoherenceMessage.h"
 
 #include <vector>
+#include <cassert>
+
+class Cache;
 
 class Interconnect
 {
 public:
-    void attach_cache(Cache* cache);
+    void attachCache(Cache* cache);
     void routeMessage(const CoherenceMessage& msg);
 
 private:

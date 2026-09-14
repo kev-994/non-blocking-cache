@@ -1,4 +1,5 @@
 #include "Cache.h"
+#include "Interconnect.h"
 
 RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out)
 {
@@ -61,8 +62,8 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
     }
 
     MESIState transient_state{type == TargetType::Read ? MESIState::InvalidShared : MESIState::InvalidModified};
-
-    MSHREntry mshr_entry{block_address, transient_state, true};
+    std::size_t expected_acks{type == TargetType::Write ? m_total_caches - 1 : 0};
+    MSHREntry mshr_entry{block_address, transient_state, true, expected_acks};
     mshr_entry.targets.push_back(target);
 
     m_MSHRFile.push_back(mshr_entry);
@@ -76,9 +77,10 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
     return RequestStatus::Miss;
 }
 
-void Cache::processBusMessage(const CoherenceMessage& msg)
+bool Cache::processBusMessage(const CoherenceMessage& msg)
 {
     const auto tag{msg.address >> 6};
+    bool intercepted{};
     
     switch (msg.type)
     {
@@ -123,6 +125,7 @@ void Cache::processBusMessage(const CoherenceMessage& msg)
                     if (block.state == MESIState::Modified)
                     {
                         CoherenceMessage coherence_message{MessageType::Writeback, msg.address, msg.address, m_cache_id, msg.sender_id, msg.data};
+                        intercepted = true;
                         m_interconnect->routeMessage(coherence_message);
                     }
 
@@ -152,7 +155,39 @@ void Cache::processBusMessage(const CoherenceMessage& msg)
             }
             break;
         }
+
+        case MessageType::SnoopAck:
+        {
+            for (std::size_t i{}; i < m_MSHRFile.size(); ++i)
+            {
+                if (m_MSHRFile[i].block_address == msg.transaction_id)
+                {
+                    m_MSHRFile[i].acks_remaining--;
+
+                    // if all caches have invalidated their copies, complete the write
+                    if (m_MSHRFile[i].acks_remaining == 0)
+                    {
+                        CacheBlock block{tag, MESIState::Modified, msg.data}; 
+
+                        for (auto& target : m_MSHRFile[i].targets)
+                        {
+                            if (target.type == TargetType::Write)
+                            {
+                                block.data.data[target.offset] = target.write_data;
+                            }
+                        }
+
+                        m_cache_blocks.push_back(block);
+                        m_MSHRFile.erase(m_MSHRFile.begin() + i);
+                    }
+                    break;
+                }
+            }
+            break;
+        }
     }
+
+    return intercepted;
 }
 
 /*
