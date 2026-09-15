@@ -39,9 +39,9 @@ public:
     void evictLRUBlock();
 
 private:
-    std::size_t max_mshrs{4};
+    const std::size_t max_mshrs{4};
     std::size_t m_total_caches{};
-    std::size_t m_max_blocks{4}; 
+    const std::size_t m_max_blocks{4}; 
     std::uint64_t m_access_counter{0};
 
     std::vector<CacheBlock> m_cache_blocks{}; // fully associative mapping
