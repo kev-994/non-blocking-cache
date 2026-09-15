@@ -23,6 +23,7 @@ struct CacheBlock
     std::uint64_t tag{};
     MESIState state{};
     CacheLine<std::uint8_t> data{};
+    std::uint64_t last_accessed{};
 };
 
 class Cache
@@ -35,10 +36,13 @@ public:
     RequestStatus processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out);
     bool processBusMessage(const CoherenceMessage& msg);
     bool hasValidBlock(std::uint64_t address) const;
+    void evictLRUBlock();
 
 private:
     std::size_t max_mshrs{4};
     std::size_t m_total_caches{};
+    std::size_t m_max_blocks{4}; 
+    std::uint64_t m_access_counter{0};
 
     std::vector<CacheBlock> m_cache_blocks{}; // fully associative mapping
     std::vector<MSHREntry> m_MSHRFile{};

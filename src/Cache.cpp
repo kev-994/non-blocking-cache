@@ -20,6 +20,7 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
             if (type == TargetType::Read)
             {
                 read_data_out = block.data.data[offset];
+                block.last_accessed = ++m_access_counter; // <--- UPDATE TIMESTAMP
                 return RequestStatus::Hit;
             }
 
@@ -33,6 +34,7 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
                     {
                         block.data.data[offset] = write_data;
                         block.state = MESIState::Modified;
+                        block.last_accessed = ++m_access_counter; // <--- UPDATE TIMESTAMP
                         return RequestStatus::Hit;
                     }
                     case MESIState::Shared: // coherence miss, this is a read only copy
@@ -130,6 +132,8 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
                             // pull from fetch_buffer, not msg.data, in case this was triggered by a SnoopAck
                             CacheBlock new_block{tag, state, m_MSHRFile[i].fetch_buffer};
                             
+                            new_block.last_accessed = ++m_access_counter; // Stamp the newly created block
+                            
                             for (auto& target : m_MSHRFile[i].targets)
                             {
                                 if (target.type == TargetType::Write)
@@ -137,6 +141,13 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
                                     new_block.data.data[target.offset] = target.write_data;
                                 }
                             }
+
+                            // capacity check
+                            if (m_cache_blocks.size() >= m_max_blocks)
+                            {
+                                evictLRUBlock();
+                            }
+
                             m_cache_blocks.push_back(new_block);
                         }
 
@@ -229,6 +240,8 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
                                             
                             // pull from fetch_buffer, not msg.data, in case this was triggered by a SnoopAck
                             CacheBlock new_block{tag, state, m_MSHRFile[i].fetch_buffer};
+
+                            new_block.last_accessed = ++m_access_counter; // Stamp the newly created block
                             
                             for (auto& target : m_MSHRFile[i].targets)
                             {
@@ -237,6 +250,13 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
                                     new_block.data.data[target.offset] = target.write_data;
                                 }
                             }
+
+                            // capacity check
+                            if (m_cache_blocks.size() >= m_max_blocks)
+                            {
+                                evictLRUBlock();
+                            }
+
                             m_cache_blocks.push_back(new_block);
                         }
 
@@ -300,4 +320,32 @@ bool Cache::hasValidBlock(std::uint64_t address) const
         }
     }
     return false;
+}
+
+void Cache::evictLRUBlock()
+{
+    if (m_cache_blocks.empty()) return;
+
+    // find lru block (smallest last_accessed)
+    auto lru_it{m_cache_blocks.begin()};
+    for (auto it{m_cache_blocks.begin()}; it != m_cache_blocks.end(); ++it)
+    {
+        if (it->last_accessed < lru_it->last_accessed)
+        {
+            lru_it = it;
+        }
+    }
+
+    // write dirty block back to memory
+    if (lru_it->state == MESIState::Modified)
+    {
+        // reconstruct the full 64-bit address by shifting the tag back
+        std::uint64_t evicted_address{lru_it->tag << 6}; 
+        
+        CoherenceMessage writeback{MessageType::Writeback, evicted_address, evicted_address, m_cache_id, MEMORY_ID, lru_it->data};
+        m_interconnect->routeMessage(writeback);
+    }
+
+    // evict block
+    m_cache_blocks.erase(lru_it);
 }
