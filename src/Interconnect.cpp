@@ -21,6 +21,7 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
             if (msg.receiver_id != MEMORY_ID && msg.receiver_id < m_caches.size())
             {
                 auto copy{msg};
+                copy.is_shared = true;
                 copy.type = MessageType::ReadResponse;
 
                 m_caches[msg.receiver_id]->processBusMessage(copy);
@@ -52,7 +53,8 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
         {
             auto snoop_msg{msg};
             snoop_msg.type = MessageType::SnoopRead;
-            bool intercepted{false};
+            bool intercepted{};
+            bool shared_wire{};
 
             for (std::size_t i{}; i < m_caches.size(); ++i)
             {
@@ -63,13 +65,20 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
                     {
                         intercepted = true;
                     }
+
+                    if (m_caches[i]->hasValidBlock(msg.address))
+                    {
+                        shared_wire = true;
+                    }
                 }
             }
 
             // only fetch from memory if no sibling cache had the dirty data
             if (!intercepted)
             {
-                m_memory->processBusMessage(msg);
+                auto mem_msg{msg};
+                mem_msg.is_shared = shared_wire;
+                m_memory->processBusMessage(mem_msg);
             }
             return;
         }
@@ -91,6 +100,36 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
                 m_caches[msg.receiver_id]->processBusMessage(msg);
             }
             break;
+        }
+
+        case MessageType::ReadyForOwnership:
+        {
+            auto snoop_msg{msg};
+            snoop_msg.type = MessageType::SnoopRFO;
+            bool intercepted{false};
+
+            // broadcast the RFO snoop to all sibling caches
+            for (std::size_t i{}; i < m_caches.size(); ++i)
+            {
+                if (i != msg.sender_id)
+                {
+                    // if processBusMessage returns true, a sibling had dirty data and fired a Writeback
+                    if (m_caches[i]->processBusMessage(snoop_msg))
+                    {
+                        intercepted = true;
+                    }
+                }
+            }
+
+            // only fetch from the MemoryController if no sibling had the dirty data
+            if (!intercepted)
+            {
+                // send a standard ReadRequest to memory so it returns a ReadResponse payload
+                auto mem_msg{msg};
+                mem_msg.type = MessageType::ReadRequest; 
+                m_memory->processBusMessage(mem_msg);
+            }
+            return;
         }
     } 
 }

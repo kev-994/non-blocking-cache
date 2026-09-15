@@ -23,12 +23,14 @@ enum class MessageType
     ReadResponse,
 
     WriteRequest,
+    ReadyForOwnership,
 
     Writeback,
 
     SnoopRead,
     SnoopInvalidate,
-    SnoopAck
+    SnoopAck,
+    SnoopRFO
 };
 
 struct CoherenceMessage
@@ -39,4 +41,5 @@ struct CoherenceMessage
     std::uint64_t sender_id{};
     std::uint64_t receiver_id{};
     CacheLine<std::uint8_t> data{};
+    bool is_shared{};
 };

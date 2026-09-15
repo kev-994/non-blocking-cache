@@ -34,6 +34,7 @@ public:
 
     RequestStatus processCPURequest(TargetType type, std::uint64_t address, std::uint8_t write_data, std::uint8_t& read_data_out);
     bool processBusMessage(const CoherenceMessage& msg);
+    bool hasValidBlock(std::uint64_t address) const;
 
 private:
     std::size_t max_mshrs{4};

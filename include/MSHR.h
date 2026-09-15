@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoherenceMessage.h"
+#include "CacheLine.h"
 
 #include <cstdint>
 #include <vector>
@@ -26,4 +27,6 @@ struct MSHREntry
     bool request_issued{};
     std::size_t acks_remaining{}; // tracks pending invalidations
     std::vector<Target> targets{}; // queue up all the individual cpu requests waiting on this block, in reality this would be bounded
+    bool data_received{};
+    CacheLine<std::uint8_t> fetch_buffer{};
 };

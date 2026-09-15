@@ -12,7 +12,6 @@ int main()
     Interconnect noc;
     MemoryController memory(&noc);
     
-    // Initializing with total_caches = 3 to test the acks_remaining counter
     Cache cache0(0, &noc, 3);
     Cache cache1(1, &noc, 3);
     Cache cache2(2, &noc, 3);
@@ -25,59 +24,66 @@ int main()
     std::uint8_t read_data{0};
     RequestStatus status;
 
-    // --- TEST 1: Byte-Level Offsets & Write Hits ---
-    // Cache 0 reads block 0x2000 (Cold Miss)
-    status = cache0.processCPURequest(TargetType::Read, 0x2000, 0, read_data);
+    // --- TEST 1: Cold Read & Exclusive State ---
+    // Cache 0 fetches empty address 0x1000. It is not shared, so it becomes Exclusive.
+    status = cache0.processCPURequest(TargetType::Read, 0x1000, 0, read_data);
     assert(status == RequestStatus::Miss);
     
-    // Cache 0 writes to offset 4 of block 0x2000 (Coherence Miss: Shared -> Modified)
-    status = cache0.processCPURequest(TargetType::Write, 0x2004, 0xDD, read_data);
-    assert(status == RequestStatus::Miss); 
+    status = cache0.processCPURequest(TargetType::Read, 0x1000, 0, read_data);
+    assert(status == RequestStatus::Hit);
+    assert(read_data == 0x00);
 
-    // Cache 0 writes to offset 8 of block 0x2000 (Write Hit: Already Modified)
-    status = cache0.processCPURequest(TargetType::Write, 0x2008, 0xEE, read_data);
+    // --- TEST 2: Silent Upgrade (Exclusive -> Modified) ---
+    // Cache 0 writes to its Exclusive block. No bus traffic generated.
+    status = cache0.processCPURequest(TargetType::Write, 0x1004, 0xAA, read_data);
     assert(status == RequestStatus::Hit); 
 
-    // --- TEST 2: C2C Transfer of Specific Offsets ---
-    // Cache 1 reads offset 4. Cache 0 must intercept and supply the block.
-    status = cache1.processCPURequest(TargetType::Read, 0x2004, 0, read_data);
-    assert(status == RequestStatus::Miss);
+    // --- TEST 3: C2C Transfer & Downgrade (Modified -> Shared) ---
+    // Cache 1 reads 0x1000. Cache 0 must intercept SnoopRead, supply data, and downgrade to Shared.
+    status = cache1.processCPURequest(TargetType::Read, 0x1000, 0, read_data);
+    assert(status == RequestStatus::Miss); 
     
-    // Verify Cache 1 received the exact byte written by Cache 0 at offset 4
-    status = cache1.processCPURequest(TargetType::Read, 0x2004, 0, read_data);
+    status = cache1.processCPURequest(TargetType::Read, 0x1004, 0, read_data);
     assert(status == RequestStatus::Hit);
-    assert(read_data == 0xDD); 
-    
-    // Verify Cache 1 also received the byte at offset 8 within the same 64-byte payload
-    status = cache1.processCPURequest(TargetType::Read, 0x2008, 0, read_data);
-    assert(status == RequestStatus::Hit);
-    assert(read_data == 0xEE); 
+    assert(read_data == 0xAA); 
 
-    // --- TEST 3: Multi-Cache Invalidation (SnoopAck counting) ---
-    // Cache 0 and 1 now hold 0x2000 in Shared. Cache 2 reads it (C2C or Memory fetch).
+    // --- TEST 4: Coherence Upgrade (Shared -> Modified) ---
+    // Cache 0 writes to 0x1000. It is Shared, so it sends WriteRequest (SnoopInvalidate).
+    status = cache0.processCPURequest(TargetType::Write, 0x1008, 0xBB, read_data);
+    assert(status == RequestStatus::Miss); 
+    
+    // Verification: Cache 1 was invalidated and must miss on its next read.
+    status = cache1.processCPURequest(TargetType::Read, 0x1008, 0, read_data);
+    assert(status == RequestStatus::Miss); 
+
+    // --- TEST 5: Cold Write Miss (Read-For-Ownership) ---
+    // Cache 2 writes to a new address 0x2000. Broadcasts SnoopRFO and fetches from memory.
+    status = cache2.processCPURequest(TargetType::Write, 0x2000, 0xCC, read_data);
+    assert(status == RequestStatus::Miss); 
+    
+    status = cache2.processCPURequest(TargetType::Read, 0x2000, 0, read_data);
+    assert(status == RequestStatus::Hit);
+    assert(read_data == 0xCC);
+
+    // --- TEST 6: RFO Interception (Dirty Block Stolen) ---
+    // Cache 0 writes to 0x2000. Cache 2 holds it in Modified. 
+    // Cache 2 must intercept SnoopRFO, fire a Writeback, send an Ack, and invalidate itself.
+    status = cache0.processCPURequest(TargetType::Write, 0x2004, 0xDD, read_data);
+    assert(status == RequestStatus::Miss); 
+    
+    // Verification: Cache 2 must now be Invalid.
     status = cache2.processCPURequest(TargetType::Read, 0x2000, 0, read_data);
     assert(status == RequestStatus::Miss);
-    
-    // Cache 2 writes to 0x2000. It must broadcast SnoopInvalidate and receive exactly 2 Acks.
-    status = cache2.processCPURequest(TargetType::Write, 0x2000, 0xFF, read_data);
-    assert(status == RequestStatus::Miss); 
 
-    // Verify Cache 0 and 1 were successfully forced into the Invalid state
+    // Verification: Cache 0's block must contain Cache 2's dirty data PLUS its own target write.
     status = cache0.processCPURequest(TargetType::Read, 0x2000, 0, read_data);
-    assert(status == RequestStatus::Miss); 
-    status = cache1.processCPURequest(TargetType::Read, 0x2000, 0, read_data);
-    assert(status == RequestStatus::Miss); 
-
-    // --- TEST 4: Cold Write Miss (The RFO limitation) ---
-    // Cache 0 writes to a completely new block 0x3000. 
-    status = cache0.processCPURequest(TargetType::Write, 0x3000, 0x11, read_data);
-    assert(status == RequestStatus::Miss);
-    
-    // Verify the write applied to the locally created block
-    status = cache0.processCPURequest(TargetType::Read, 0x3000, 0, read_data);
     assert(status == RequestStatus::Hit);
-    assert(read_data == 0x11);
+    assert(read_data == 0xCC); // Cache 2's old write
 
-    std::cout << "All deep architectural assertions passed successfully.\n";
+    status = cache0.processCPURequest(TargetType::Read, 0x2004, 0, read_data);
+    assert(status == RequestStatus::Hit);
+    assert(read_data == 0xDD); // Cache 0's new write
+
+    std::cout << "All exhaustive architectural assertions passed successfully.\n";
     return 0;
 }

@@ -10,6 +10,7 @@ void MemoryController::processBusMessage(const CoherenceMessage& msg)
             auto it{m_backing_store.find(msg.address)}; // block address
 
             CoherenceMessage read_response{MessageType::ReadResponse, msg.address, msg.transaction_id, msg.sender_id, msg.sender_id};
+            read_response.is_shared = msg.is_shared;
 
             if (it != m_backing_store.end()) // address is in memory
             {
