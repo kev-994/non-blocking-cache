@@ -134,3 +134,5 @@ void Interconnect::routeMessage(const CoherenceMessage& msg)
     } 
 }
 
+void Interconnect::tick() const
+{}

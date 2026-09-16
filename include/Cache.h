@@ -37,6 +37,8 @@ public:
     bool processBusMessage(const CoherenceMessage& msg);
     bool hasValidBlock(std::uint64_t address) const;
     void evictLRUBlock();
+    void tick() const;
+    MESIState checkState(std::uint64_t address) const;
 
 private:
     const std::size_t max_mshrs{4};

@@ -56,6 +56,10 @@ RequestStatus Cache::processCPURequest(TargetType type, std::uint64_t address, s
     {
         if(mshr.block_address == block_address)
         {
+            if (target.type == TargetType::Write)
+            {
+                mshr.transient_state = MESIState::InvalidModified;
+            }
             mshr.targets.push_back(target);
             return RequestStatus::Miss;
         }
@@ -108,7 +112,7 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
 
                         for (auto& block : m_cache_blocks)
                         {
-                            if (block.tag == tag) // coherence upgrade
+                            if (block.tag == tag && block.state != MESIState::Invalid) // coherence upgrade
                             {
                                 block.state = MESIState::Modified;
                                 for (auto& target : m_MSHRFile[i].targets)
@@ -217,7 +221,7 @@ bool Cache::processBusMessage(const CoherenceMessage& msg)
 
                         for (auto& block : m_cache_blocks)
                         {
-                            if (block.tag == tag) // coherence upgrade
+                            if (block.tag == tag && block.state != MESIState::Invalid) // coherence upgrade
                             {
                                 block.state = MESIState::Modified;
                                 for (auto& target : m_MSHRFile[i].targets)
@@ -348,4 +352,22 @@ void Cache::evictLRUBlock()
 
     // evict block
     m_cache_blocks.erase(lru_it);
+}
+
+void Cache::tick() const
+{}
+
+MESIState Cache::checkState(std::uint64_t address) const
+{
+    const std::uint64_t tag{address >> 6};
+
+    for (const auto& block : m_cache_blocks)
+    {
+        if (block.tag == tag)
+        {
+            return block.state;
+        }
+    }
+
+    return MESIState::Invalid;
 }

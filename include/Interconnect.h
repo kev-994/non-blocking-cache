@@ -14,6 +14,7 @@ public:
     void attachCache(Cache* cache);
     void attachMemory(MemoryController* memory); // setter
     void routeMessage(const CoherenceMessage& msg);
+    void tick() const;
 
 private:
     std::vector<Cache*> m_caches{};
