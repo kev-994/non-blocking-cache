@@ -1,6 +1,6 @@
-# Non-Blocking Cache Hierarchy with MSHRs & MESI
+# Multi-Cache Coherence Simulator
 
-A cycle-driven, event-based simulator of a multi-core cache hierarchy implementing the **MESI coherence protocol** with **non-blocking cache** behaviour via **Miss Status Holding Registers (MSHRs)**. The model captures the request/response and snoop traffic between private L1-style caches, a shared interconnect, and a latency-modelled backing memory.
+A cycle-driven, event-based simulator of a multiple caches implementing the **MESI coherence protocol** with **non-blocking cache** behaviour via **Miss Status Holding Registers (MSHRs)**. The model captures the request/response and snoop traffic between private L1-style caches, a shared interconnect, and a latency-modelled backing memory.
 
 ## Overview
 
